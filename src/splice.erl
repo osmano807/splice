@@ -41,23 +41,19 @@
 %% ------------------------------------------------------------------
 
 start_link() ->
-    io:format("Passei: ~p:~p~n", [?MODULE, ?LINE]),
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
 stop() ->
     gen_server:cast(?SERVER, stop).
 
 send(In, Out, Offset, Count) when is_integer(Count)->
-    io:format("Passei: ~p:~p~n", [?MODULE, ?LINE]),
     do_send(In, Out, Offset, Count).
 
 -ifdef(HAVE_SPLICE).
 enabled() ->
-    io:format("Passei: ~p:~p~n", [?MODULE, ?LINE]),
     true.
 -else.
 enabled() ->
-    io:format("Passei: ~p:~p~n", [?MODULE, ?LINE]),
     false.
 -endif.
 
@@ -74,26 +70,22 @@ enabled() ->
          }).
 
 init([]) ->
-    io:format("Passei: ~p:~p~n", [?MODULE, ?LINE]),
     process_flag(trap_exit, true),
     Shlib = "splice_drv",
-    io:format("Passei: ~p:~p~n", [?MODULE, ?LINE]),
     Dir = code:priv_dir(?MODULE),
-    io:format("Passei: ~p:~p~n", [?MODULE, ?LINE]),
     case erl_ddll:load_driver(Dir, Shlib) of
-        ok -> io:format("Passei: ~p:~p~n", [?MODULE, ?LINE]), ok;
-        {error, already_loaded} -> ok;
-        _ -> io:format("Passei: ~p:~p~n", [?MODULE, ?LINE]), exit({error, "could not load driver " ++ Shlib})
+        ok -> 
+            ok;
+        {error, already_loaded} -> 
+            ok;
+        _ -> 
+            exit({error, "could not load driver " ++ Shlib})
     end,
-    io:format("Passei: ~p:~p~n", [?MODULE, ?LINE]),
     Port = open_port({spawn, Shlib}, [binary]),
-    io:format("Passei: ~p:~p~n", [?MODULE, ?LINE]),
     CallerTable = ets:new(splice_drv, []),
-    io:format("Passei: ~p:~p~n", [?MODULE, ?LINE]),
     {ok, #state{port = Port, caller_tbl = CallerTable}}.
 
 handle_call({send, InFd, Msg}, From, State) ->
-    io:format("Passei: ~p:~p~n", [?MODULE, ?LINE]),
     true = erlang:port_command(State#state.port, Msg),
     true = ets:insert(State#state.caller_tbl, {InFd, From}),
     {noreply, State};
@@ -101,24 +93,18 @@ handle_call(_Request, _From, State) ->
     {reply, ok, State}.
 
 handle_info({_, {data, <<Cnt:64, InFd:32, _OutFd:32, Res:8, Err/binary>>}}, State) ->
-    io:format("Passei: ~p:~p~n", [?MODULE, ?LINE]),
     Reply = case Res of
                 1 ->
-                    io:format("Passei: ~p:~p~n", [?MODULE, ?LINE]),
                     {ok, Cnt};
                 0 ->
-                    io:format("Passei: ~p:~p~n", [?MODULE, ?LINE]),
                     {error,
                      list_to_atom(
                        lists:takewhile(fun(El) -> El =/= 0 end,
                                        binary_to_list(Err)))}
             end,
     CallerTable = State#state.caller_tbl,
-    io:format("Passei: ~p:~p~n", [?MODULE, ?LINE]),
     [{InFd, From}] = ets:lookup(CallerTable, InFd),
-    io:format("Passei: ~p:~p~n", [?MODULE, ?LINE]),
     gen_server:reply(From, Reply),
-    io:format("Passei: ~p:~p~n", [?MODULE, ?LINE]),
     ets:delete(CallerTable, InFd),
     {noreply, State};
 handle_info(_Info, State) ->
@@ -161,19 +147,15 @@ code_change(_OldVsn, State, _Extra) ->
 
 -ifdef(HAVE_SPLICE).
 do_send(_In, _Out, _Offset, Count) when Count =< 0 ->
-    io:format("Passei: ~p:~p~n", [?MODULE, ?LINE]),
     {ok, 0};
 do_send(In, Out, Offset, Count) ->
-    io:format("Passei: ~p:~p~n", [?MODULE, ?LINE]),
     {ok, InFd} = prim_inet:getfd(In),
     {ok, OutFd} =  prim_inet:getfd(Out),
     Call = list_to_binary([<<Offset:64, Count:64, InFd:32, OutFd:32>>, <<0:8>>]),
-    io:format("Passei: ~p:~p~n", [?MODULE, ?LINE]),
     case gen_server:call(?SERVER, {send, InFd, Call}, infinity) of
         {error, eoverflow} ->
             compat_send(In, Out, Count, Count);
         Else ->
-            io:format("Passei: ~p:~p~n", [?MODULE, ?LINE]),
             Else
     end.
 -else.
