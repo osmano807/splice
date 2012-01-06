@@ -1,0 +1,12 @@
+{application, splice,
+ [{description, "splice linked-in driver"},
+  {vsn, git},
+  {modules, []},
+  {applications, [
+                  kernel,
+                  stdlib
+                 ]},
+  {registered, [splice]},
+  {mod, {splice_app, []}},
+  {env, []}
+ ]}.

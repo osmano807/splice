@@ -1,0 +1,6 @@
+This product includes software covered by the following licenses:
+
+  c_src/hashtable.[c,h] c_src/hashtable_private.h
+  Copyright (c) 2002, 2004, Christopher Clark
+  made available under a BSD-style license that
+  can be found in the respective hashtable source files.
