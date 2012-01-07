@@ -70,6 +70,7 @@ enabled() ->
          }).
 
 init([]) ->
+    error_logger:info_msg("Have splice, have a nice day!~n"),
     process_flag(trap_exit, true),
     Shlib = "splice_drv",
     Dir = code:priv_dir(?MODULE),
@@ -98,9 +99,8 @@ handle_info({_, {data, <<Cnt:64, InFd:32, _OutFd:32, Res:8, Err/binary>>}}, Stat
                     {ok, Cnt};
                 0 ->
                     {error,
-                     list_to_atom(
                        lists:takewhile(fun(El) -> El =/= 0 end,
-                                       binary_to_list(Err)))}
+                                       binary_to_list(Err))}
             end,
     CallerTable = State#state.caller_tbl,
     [{InFd, From}] = ets:lookup(CallerTable, InFd),
@@ -121,6 +121,7 @@ terminate(_Reason, #state{port = Port, caller_tbl = CallerTable}) ->
 -else.
 
 init(Args) ->
+    error_logger:info_msg("Don't have splice :(!~n"),
     {ok, Args}.
 
 handle_call(_Request, _From, State) ->

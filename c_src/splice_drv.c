@@ -31,7 +31,7 @@
 #ifndef ERL_DRV_NIL
 #include "erl_driver_compat.h"
 #endif
-
+#include <stdio.h>
 /*
  * previously drv_output(..., int len)
  * since R15B drv_output(..., ErlDrvSizeT len)
@@ -70,6 +70,44 @@ typedef int ErlDrvSizeT;
     put_shift(i, s, 6,  8); \
     put_shift(i, s, 7,  0); \
     } while(0)
+
+#include <limits.h>
+
+/* Nonzero if the integer type T is signed.  */
+#define TYPE_SIGNED(t) (! ((t) 0 < (t) -1))
+
+/* Bound on length of the string representing an integer value of type T.
+   Subtract one for the sign bit if T is signed;
+   302 / 1000 is log10 (2) rounded up;
+   add one for integer division truncation;
+   add one more for a minus sign if t is signed.  */
+#define INT_STRLEN_BOUND(t) \
+  ((sizeof (t) * CHAR_BIT - TYPE_SIGNED (t)) * 302 / 1000 \
+   + 1 + TYPE_SIGNED (t))
+
+char *
+inttostr (int i, char *buf)
+{
+  char *p = buf + INT_STRLEN_BOUND (int);
+  *p = 0;
+
+  if (i < 0)
+    {
+      do
+    *--p = '0' - i % 10;
+      while ((i /= 10) != 0);
+
+      *--p = '-';
+    }
+  else
+    {
+      do
+    *--p = '0' + i % 10;
+      while ((i /= 10) != 0);
+    }
+
+  return p;
+}
 
 typedef union {
     void* hashkey;
@@ -168,41 +206,75 @@ static ErlDrvSizeT set_error_buffer(Buffer* b, int socket_fd, int err)
     return result_size - 1 + t - b->result->errno_string;
 }
 
+static ErlDrvSizeT set_error_buffer_str(Buffer* b, int socket_fd, char* s, int err)
+{
+    char *t;
+    ErlDrvSizeT result_size = sizeof *(b->result);
+    memset(b->result, 0, result_size);
+    put_int32(socket_fd, &(b->result->in_fd));
+    char *se;
+    se = erl_errno_id(err);
+    if (strcmp(se, "unknown") == 0 && err == EOVERFLOW) {
+        se = "EOVERFLOW";
+    }
+    for (t = b->result->errno_string; *s; s++, t++) {
+        *t = tolower(*s);
+    }
+    *t = ' ';
+    for (t++; *se; se++, t++) {
+        *t = tolower(*se);
+    }
+    *t = '\0';
+    return result_size - 1 + t - b->result->errno_string;
+}
+
+
 static ssize_t splice_call(int in_fd, int out_fd, off_t* in_offset, size_t count)
 {
 #if defined(__linux__)
     int mpipe[2], saved_errno = 0;
     if(pipe(mpipe) < 0) {
-        return -1;
+        return -30;
     }
     
     off_t cur = *in_offset;
-    ssize_t received = splice(in_fd, NULL, mpipe[1], NULL, count, SPLICE_F_MORE | SPLICE_F_MOVE);
+    ssize_t received = splice(in_fd, NULL, mpipe[1], NULL, count, SPLICE_F_MORE );
 
-   if (received >= 0 && received != count) {            
+   if (received > 0 && received != count) {            
        if (*in_offset == cur) {                
            *in_offset += received;           
            saved_errno = EAGAIN;
        }            
-   }
-   else if(received < 0 && errno == EINTR) {
+   } else if(received == 0) {
+       return -29;
+   } else if(received < 0 && errno == EINTR) {
         errno = EAGAIN;
+        close (mpipe [0]);
+        close (mpipe [1]);
         return -1;
    } else if (received < 0) {
-        return -1;
+        close (mpipe [0]);
+        close (mpipe [1]);
+        return -31;
    }
  
-   ssize_t sent = splice(mpipe[0], NULL, out_fd, NULL, received, SPLICE_F_MORE | SPLICE_F_MOVE);
+   ssize_t sent = splice(mpipe[0], NULL, out_fd, NULL, received, SPLICE_F_MORE );
     
    if(sent < 0 && sent == EINTR) { /* Should I return EAGAIN from *HERE*? */
         errno = EAGAIN;
+        close (mpipe [0]);
+        close (mpipe [1]);
         return -1;
    } else if (sent < 0) {
-        return -1;
+        close (mpipe [0]);
+        close (mpipe [1]);
+        return -32;
    }
 
   
     errno = saved_errno;
+    close (mpipe [0]);
+    close (mpipe [1]);
     return received;
 #else
     errno = ENOSYS;
@@ -272,18 +344,23 @@ static void splice_drv_ready_output(ErlDrvData handle, ErlDrvEvent ev)
         return;
     }
     cur_offset = xfer->offset;
+    printf("%d: splice_call\n", __LINE__);
     result = splice_call(sfd->socket_fd, xfer->file_fd,
                            &xfer->offset, xfer->count);
     if (result < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+        printf("%d: result: %Zd, errno: %s\n", __LINE__, result, strerror(errno));
         if (xfer->offset != cur_offset) {
+            printf("%d: offset: %Zd, cur_offset: %Zd\n", __LINE__, xfer->offset, cur_offset);
             off_t written = xfer->offset - cur_offset;
             xfer->count -= written;
             xfer->total += written;
         }
     } else {
         int save_errno = errno;
+        printf("%d: result: %Zd, errno: %s\n", __LINE__, result, strerror(errno));
         ErlDrvSizeT out_buflen;
         char buf[36]; /* TODO: wtf is this? */
+        char buf2[10];
         Buffer b;
         b.buffer = buf;
         memset(buf, 0, sizeof buf);
